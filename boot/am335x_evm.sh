@@ -133,9 +133,72 @@ g_network="iSerialNumber=${SERIAL_NUMBER} iManufacturer=${manufacturer} iProduct
 
 #In a single partition setup, dont load g_multi, as we could trash the linux file system...
 if [ "x${root_drive}" = "x/dev/mmcblk0p1" ] || [ "x${root_drive}" = "x/dev/mmcblk1p1" ] ; then
+
 	if [ -f /usr/sbin/udhcpd ] || [ -f /usr/sbin/dnsmasq ] ; then
 		#Make sure (# CONFIG_USB_ETH_EEM is not set), otherwise this shows up as "usb0" instead of ethX on host pc..
-		modprobe g_ether ${g_network} || true
+		# Let's use the new configfs based approach
+		#modprobe g_ether ${g_network} || true
+		modprobe libcomposite
+		cd /sys/kernel/config/usb_gadget
+		
+		# New gagdet
+		mkdir -p ii
+		cd ii
+
+		# http://pid.codes/1209/cafe/
+		echo 0xCAFE > idProduct
+		echo 0x1209 > idVendor
+		mkdir -p strings/0x409
+		echo 01 > strings/0x409/serialnumber
+		echo ii > strings/0x409/manufacturer
+		echo iiGadget > strings/0x409/product
+
+		# our first config
+		mkdir -p configs/c.1
+		mkdir -p configs/c.1/strings/0x409
+		echo "iiKeyboardDiskNet" > configs/c.1/strings/0x409/configuration
+		echo 500 > configs/c.1/MaxPower
+
+		# Undocumented but available via http://www.spinics.net/lists/linux-usb/msg110976.html
+
+		#+c_chmask - capture channel mask
+		#+c_srate - capture sampling rate
+		#+c_ssize - capture sample size (bytes)
+		#+p_chmask - playback channel mask
+		#+p_srate - playback sampling rate
+		#+p_ssize - playback sample size (bytes)
+		mkdir -p functions/uac2.0
+		ln -sf functions/uac2.0 configs/c.1
+		
+		# our first function, a hid device (keyboard, mouse, joystick)
+		# should create /dev/hidg0
+		mkdir -p functions/hid.usb0
+		echo 1 > functions/hid.usb0/protocol
+		echo 1 > functions/hid.usb0/subclass
+		echo 8 > functions/hid.usb0/report_length
+		echo -ne \\x05\\x01\\x09\\x06\\xa1\\x01\\x05\\x07\\x19\\xe0\\x29\\xe7\\x15\\x00\\x25\\x01\\x75\\x01\\x95\\x08\\x81\\x02\\x95\\x01\\x75\\x08\\x81\\x03\\x95\\x05\\x75\\x01\\x05\\x08\\x19\\x01\\x29\\x05\\x91\\x02\\x95\\x01\\x75\\x03\\x91\\x03\\x95\\x06\\x75\\x08\\x15\\x00\\x25\\x65\\x05\\x07\\x19\\x00\\x29\\x65\\x81\\x00\\xc0 > functions/hid.usb0/report_desc
+		ln -sf functions/hid.usb0 configs/c.1
+
+		# https://wiki.tizen.org/wiki/USB/Linux_USB_Layers/Configfs_Composite_Gadget/Usage_eq._to_g_serial.ko
+		# on host 'screen /dev/ttyACM0 115200
+		# on device... probably want to run at getty
+		mkdir -p functions/acm.tty1 #ttyACMX / ttyGSX ?
+		ln -sf functions/acm.tty1 configs/c.1
+
+		# https://wiki.tizen.org/wiki/USB/Linux_USB_Layers/Configfs_Composite_Gadget/Usage_eq._to_g_mass_storage.ko
+		mkdir -p functions/mass_storage.0
+		echo /root/lun0.img > functions/mass_storage.0/lun.0/file
+		mkdir -p functions/mass_storage.0/lun.1
+		echo /root/lun1.img > functions/mass_storage.0/lun.1/file
+		ln -sf functions/mass_storage.0 configs/c.1
+
+		mkdir -p functions/ecm.0
+		ln -sf functions/ecm.0 configs/c.1
+		#mkdir -p functions/rndis.0
+		#ln -sf functions/rndis.0 configs/c.1
+
+		# # ls /sys/class/udc/ #=> musb-hdrc.0.auto
+		echo musb-hdrc.0.auto > UDC
 	else
 		#serial:
 		modprobe g_serial || true
